@@ -2,14 +2,14 @@
 // © polypokrbinc
 //@version=5
 
-strategy("Multi Scalping Strategy [Dimkud Clone]", shorttitle="MSS Clone", overlay=true, pyramiding=3, default_qty_type=strategy.percent_of_equity, default_qty_value=10, initial_capital=10000, commission_type=strategy.commission.percent, commission_value=0.1, calc_on_order_fills=true, calc_on_every_tick=false, max_labels_count=500, max_lines_count=500, max_bars_back=5000, process_orders_on_close=true, fill_orders_on_standard_ohlc=true)
+strategy("Multi Scalping Strategy [Dimkud]", shorttitle="MSS", overlay=true, pyramiding=3, default_qty_type=strategy.percent_of_equity, default_qty_value=10, initial_capital=10000, commission_type=strategy.commission.percent, commission_value=0.1, calc_on_order_fills=true, calc_on_every_tick=false, max_labels_count=500, max_lines_count=500, max_bars_back=5000, process_orders_on_close=true, fill_orders_on_standard_ohlc=true)
 
 // ===============================
 // BASIC TRADING SETTINGS
 // ===============================
 basic_group = "═══════════ Basic Trading Settings ═══════════"
-use_long_trades = input.bool(true, "Use Long Trades", group=basic_group)
-use_short_trades = input.bool(true, "Use Short Trades", group=basic_group)
+use_long_trades = input.bool(false, "Use Long ?", group=basic_group)
+use_short_trades = input.bool(true, "Use Short ?", group=basic_group)
 allow_entry_without_indicators = input.bool(false, "Allow Entry if NO Indicators Active?", group=basic_group)
 entry_cooldown_bars = input.int(5, "Min Bars Between Entries", minval=0, maxval=100, group=basic_group)
 
@@ -90,10 +90,20 @@ var bool waiting_for_short_indent = false
 var bool tp1_executed = false
 var bool tp2_executed = false
 var bool tp3_executed = false
+var bool tp4_executed = false
 
 // ===============================
 // HELPER FUNCTIONS
 // ===============================
+// Helper function for smoothing
+smoothing_function(src, length, smoothing_type) =>
+    result = switch smoothing_type
+        "SMA" => ta.sma(src, length)
+        "EMA" => ta.ema(src, length)
+        "WMA" => ta.wma(src, length)
+        => ta.wma(src, length)
+    result
+
 ma_function(src, length, ma_type) =>
     result = switch ma_type
         "SMA" => ta.sma(src, length)
@@ -147,8 +157,8 @@ calculate_supertrend(src_high, src_low, src_close, factor, period, prev_directio
 // VISUALIZATION SETTINGS
 // ===============================
 viz_group = "═══════════ Visualization ═══════════"
-show_tp_sl = input.bool(true, "Display TP/SL Visualization", group=viz_group)
-show_entry_signals = input.bool(true, "Show Entry Signals", group=viz_group)
+show_tp_sl = input.bool(false, "Display Visualisation for TP/SL ?", group=viz_group)
+show_entry_signals = input.bool(false, "Show Signals ?", group=viz_group)
 show_all_signals = input.bool(false, "Show All Signals (even if position open)", group=viz_group)
 
 // ===============================
@@ -156,25 +166,25 @@ show_all_signals = input.bool(false, "Show All Signals (even if position open)",
 // ===============================
 period_group = "═══════════ Period Settings ═══════════"
 start_year = input.int(2022, "Start Year", minval=2000, maxval=2100, group=period_group)
-stop_year = input.int(2025, "Stop Year", minval=2000, maxval=2100, group=period_group)
+stop_year = input.int(2030, "Stop Year", minval=2000, maxval=2100, group=period_group)
 
-days_group = "═══════════ Days To Block ═══════════"
+days_group = "═══════════ Time Filter (Use For Tests) ═══════════"
 block_sunday = input.bool(false, "Su", group=days_group, inline="days1")
 block_monday = input.bool(false, "Mo", group=days_group, inline="days1") 
 block_tuesday = input.bool(false, "Tu", group=days_group, inline="days1")
 block_wednesday = input.bool(false, "We", group=days_group, inline="days1")
 block_thursday = input.bool(false, "Th", group=days_group, inline="days2")
 block_friday = input.bool(false, "Fr", group=days_group, inline="days2")
-block_saturday = input.bool(false, "Sa", group=days_group, inline="days2")
+block_saturday = input.bool(false, "Sa - Days To Block", group=days_group, inline="days2")
 
 // ===============================
 // TP/SL SETTINGS
 // ===============================
-tpsl_group = "═══════════ TP/SL Settings ═══════════"
-take_profit_percent = input.float(2.0, "Take Profit (%)", minval=0.1, maxval=20.0, step=0.1, group=tpsl_group)
+tpsl_group = "═══════════ Static SL/TP ═══════════"
+take_profit_percent = input.float(1.5, "Take Profit (%)", minval=0.1, maxval=20.0, step=0.1, group=tpsl_group)
 stop_loss_percent = input.float(1.5, "Stop Loss (%)", minval=0.1, maxval=50.0, step=0.1, group=tpsl_group)
-sl_equals_tp = input.bool(false, "SL=TP ? (for optimization)", group=tpsl_group)
-close_only_profit = input.bool(false, "Close only in Profit", group=tpsl_group)
+sl_equals_tp = input.bool(false, "SL = TP ?", group=tpsl_group)
+close_only_profit = input.bool(false, "Close only in Profit. (Used only for \"Close Conditions\")", group=tpsl_group)
 min_profit_percent = input.float(0.1, "Min Profit % for Close", minval=0.01, maxval=2.0, step=0.01, group=tpsl_group)
 
 // Reverse Orders
@@ -194,13 +204,15 @@ breakeven_level = input.float(0.1, "New Breakeven SL (%)", minval=0.0, maxval=5.
 // MULTI TAKE PROFITS
 // ===============================
 mtp_group = "═══════════ Multi Take Profits ═══════════"
-use_multi_tp = input.bool(false, "Use Multiple Take Profits", group=mtp_group)
-tp1_percent = input.float(0.6, "TP1 Profit (%)", minval=0.1, maxval=10.0, step=0.1, group=mtp_group)
-tp1_qty = input.int(25, "TP1 Quantity (%)", minval=10, maxval=90, group=mtp_group)
-tp2_percent = input.float(1.0, "TP2 Profit (%)", minval=0.1, maxval=15.0, step=0.1, group=mtp_group)
-tp2_qty = input.int(25, "TP2 Quantity (%)", minval=10, maxval=90, group=mtp_group)
-tp3_percent = input.float(1.5, "TP3 Profit (%)", minval=0.1, maxval=20.0, step=0.1, group=mtp_group)
-tp3_qty = input.int(25, "TP3 Quantity (%)", minval=10, maxval=90, group=mtp_group)
+use_multi_tp = input.bool(false, "====== Use Multiple Take Profits ? ======", group=mtp_group)
+tp1_percent = input.float(0.2, "Profit Percent for 1 TP (%)", minval=0.1, maxval=10.0, step=0.1, group=mtp_group)
+tp1_qty = input.int(10, "Value of 1 TP (%)", minval=10, maxval=90, group=mtp_group)
+tp2_percent = input.float(0.5, "Profit Percent for 2 TP (%)", minval=0.1, maxval=15.0, step=0.1, group=mtp_group)
+tp2_qty = input.int(20, "Value of 2 TP (%)", minval=10, maxval=90, group=mtp_group)
+tp3_percent = input.float(1.0, "Profit Percent for 3 TP (%)", minval=0.1, maxval=20.0, step=0.1, group=mtp_group)
+tp3_qty = input.int(40, "Value of 3 TP (%)", minval=10, maxval=90, group=mtp_group)
+tp4_percent = input.float(2.5, "Profit Percent for 4 TP (%)", minval=0.1, maxval=25.0, step=0.1, group=mtp_group)
+tp4_qty = input.int(100, "Value of 4 TP (%) (Always All Remained)", minval=10, maxval=100, group=mtp_group)
 
 // ===============================
 // PYRAMIDING SETTINGS
@@ -229,13 +241,17 @@ indent_cancel_bars = input.int(15, "Cancel Indent Order After X Bars", minval=1,
 // ATR STOP LOSS AND TAKE PROFIT
 // ===============================
 atr_group = "═══════════ ATR SL/TP ═══════════"
-use_atr_stop_loss = input.bool(false, "Use ATR Stop Loss", group=atr_group)
-atr_sl_length = input.int(14, "ATR SL Length", minval=1, maxval=50, group=atr_group)
-atr_sl_multiplier = input.float(2.0, "ATR SL Multiplier", minval=0.5, maxval=10.0, step=0.1, group=atr_group)
+use_atr_stop_loss = input.bool(false, "Use ATR Stop Loss ?", group=atr_group)
+atr_sl_wicks = input.bool(false, "ATR SL work on Wicks ? Warning. Read ->", group=atr_group)
+atr_sl_smoothing_method = input.string("WMA", "ATR SL Smoothing Method", options=["SMA", "EMA", "WMA"], group=atr_group)
+atr_sl_length = input.int(150, "ATR SL Smoothing Period (150)", minval=1, maxval=500, group=atr_group)
+atr_sl_multiplier = input.float(4.0, "Size of ATR SL (Multiplier*ATR) (4)", minval=0.5, maxval=10.0, step=0.1, group=atr_group)
 
-use_atr_take_profit = input.bool(false, "Use ATR Take Profit", group=atr_group)
-atr_tp_length = input.int(14, "ATR TP Length", minval=1, maxval=50, group=atr_group)
-atr_tp_multiplier = input.float(2.0, "ATR TP Multiplier", minval=0.5, maxval=10.0, step=0.1, group=atr_group)
+use_atr_take_profit = input.bool(false, "Use ATR Take Profit ?", group=atr_group)
+atr_tp_wicks = input.bool(false, "ATR TP work on Wicks ? Warning. Read ->", group=atr_group)
+atr_tp_smoothing_method = input.string("WMA", "ATR TP Smoothing Method", options=["SMA", "EMA", "WMA"], group=atr_group)
+atr_tp_length = input.int(150, "ATR TP Smoothing Period (150)", minval=1, maxval=500, group=atr_group)
+atr_tp_multiplier = input.float(4.0, "Size of ATR TP (Multiplier*ATR) (4)", minval=0.5, maxval=10.0, step=0.1, group=atr_group)
 
 // ===============================
 // RSI SETTINGS
@@ -278,14 +294,22 @@ st2_memory_bars = input.int(5, "SuperTrend #2 Memory Bars", minval=1, maxval=50,
 // ===============================
 ma_group = "═══════════ Two Moving Averages ═══════════"
 use_ma = input.bool(false, "Use Moving Averages", group=ma_group)
-ma_fast_length = input.int(10, "Fast MA Length", minval=2, maxval=200, group=ma_group)
-ma_slow_length = input.int(30, "Slow MA Length", minval=2, maxval=200, group=ma_group)
-ma_fast_type = input.string("EMA", "Fast MA Type", options=["SMA", "EMA", "RMA", "WMA", "HMA", "VWMA", "TEMA", "DEMA"], group=ma_group)
-ma_slow_type = input.string("EMA", "Slow MA Type", options=["SMA", "EMA", "RMA", "WMA", "HMA", "VWMA", "TEMA", "DEMA"], group=ma_group)
+ma_fast_length = input.int(50, "Moving Average 1 length (50)", minval=2, maxval=200, group=ma_group)
+ma_slow_length = input.int(100, "Moving Average 1 length (100)", minval=2, maxval=200, group=ma_group)
+ma_fast_type = input.string("SMA", "MA 1 Smoothing Type", options=["SMA", "EMA", "RMA", "WMA", "HMA", "VWMA", "TEMA", "DEMA"], group=ma_group)
+ma_slow_type = input.string("EMA", "MA 2 Smoothing Type", options=["SMA", "EMA", "RMA", "WMA", "HMA", "VWMA", "TEMA", "DEMA"], group=ma_group)
+ma_fast_source = input.source(close, "MA1 Source", group=ma_group)
+ma_slow_source = input.source(close, "MA2 Source", group=ma_group)
+show_two_mas = input.bool(false, "Show TWO MAs. (MA1 - green, MA2 - red)", group=ma_group)
+ma_timeframe = input.timeframe("", "TWO MAs TimeFrame:", group=ma_group)
 ma_signal_type = input.string("Cross", "MA Signal Type", options=["Cross", "Direction", "Opposite Trend"], group=ma_group)
 ma_tf = input.timeframe("", "MA Timeframe", group=ma_group)
-ma_use_signal_memory = input.bool(false, "MA Use Signal Memory", group=ma_group)
-ma_memory_bars = input.int(5, "MA Memory Bars", minval=1, maxval=50, group=ma_group)
+use_ma_cross = input.bool(false, "======= Use MA1 / MA2 Cross =======", group=ma_group)
+ma_opposite_signal = input.bool(false, "Opposite Signal - \"MA1 / MA2 Cross\"", group=ma_group)
+ma_use_signal_memory = input.bool(false, "Activate \"MA1 / MA2 Cross\" Signal Memory", group=ma_group)
+ma_memory_bars = input.int(5, "Keep \"MA1 / MA2 Cross\" Signal Memory for XX bars", minval=1, maxval=50, group=ma_group)
+use_ma1_filter = input.bool(false, "===== Use MA1 as Filter. Long if Price > MA 1 =====", group=ma_group)
+ma1_filter_opposite = input.bool(false, "Opposite Signal - \"MA1 as Filter\"", group=ma_group)
 
 // ===============================
 // CHANNELS
@@ -505,6 +529,19 @@ use_volume_filter = input.bool(false, "Use Volume Filter", group=filters_group)
 volume_length = input.int(20, "Volume Length", minval=5, maxval=100, group=filters_group)
 volume_multiplier = input.float(1.5, "Volume Multiplier", minval=0.5, maxval=5.0, step=0.1, group=filters_group)
 
+// VOL1 vs VOL2 Filter (CRITICAL!)
+use_vol1_vol2 = input.bool(true, "Use VOL1 <> VOL2 ?", group=filters_group)
+vol1_to_vol2 = input.string("VOL1 < VOL2", "VOL1 to VOL2", options=["VOL1 < VOL2", "VOL1 > VOL2"], group=filters_group)
+vol1_vol2_threshold = input.float(10, "How VOL1 > (<) VOL2. More than XX%", minval=1, maxval=100, step=1, group=filters_group)
+vol1_length = input.int(20, "VOL length1 (20)(5)", minval=1, maxval=200, group=filters_group)
+vol2_length = input.int(100, "VOL length2 (100)(20)", minval=1, maxval=200, group=filters_group)
+// Highest/Lowest Bar - [SIGNALS]
+use_highlow_signal = input.bool(true, "Use Highest/Lowest Bar ?", group=filters_group)
+highlow_signal_period = input.int(10, "Is now Highest/Lowest Bar for last XX bars ?", minval=1, maxval=200, group=filters_group)
+highlow_price_percent = input.float(0, "More/Less: Price on (%)", minval=0, maxval=10, step=0.1, group=filters_group)
+highlow_atr_percent = input.float(0, "ATR on (%)", minval=0, maxval=10, step=0.1, group=filters_group)
+highlow_atr_length = input.int(50, "ATR_HL Lenght (50)", minval=1, maxval=200, group=filters_group)
+
 // Volatility Filter (ATR)
 use_volatility_filter = input.bool(false, "Use Volatility Filter", group=filters_group)
 volatility_length = input.int(20, "Volatility Length", minval=5, maxval=100, group=filters_group)
@@ -557,102 +594,15 @@ time_trade_allowed = date_filter and not day_blocked
 
 // Pre-calculate all ta.* functions to avoid scope issues
 atr_14 = ta.atr(14)
-atr_sl_val = ta.atr(atr_sl_length)
-atr_tp_val = ta.atr(atr_tp_length)
+atr_sl_val = use_atr_stop_loss ? smoothing_function(ta.atr(14), atr_sl_length, atr_sl_smoothing_method) : ta.atr(atr_sl_length)
+atr_tp_val = use_atr_take_profit ? smoothing_function(ta.atr(14), atr_tp_length, atr_tp_smoothing_method) : ta.atr(atr_tp_length)
 
-// SuperTrend calculations
-var float st_line = na
-var int st_direction = 1
-[st_new_line, st_new_dir] = calculate_supertrend(high, low, close, st_factor, st_period, st_direction, st_line)
-st_line := st_new_line
-st_direction := st_new_dir
-
-var float st2_line = na
-var int st2_direction = 1
-[st2_new_line, st2_new_dir] = calculate_supertrend(high, low, close, st2_factor, st2_period, st2_direction, st2_line)
-st2_line := st2_new_line
-st2_direction := st2_new_dir
-
-
-
-// Volume and Volatility
-volume_avg = ta.sma(volume, volume_length)
-volatility_calc = ta.stdev(close, volatility_length) / ta.sma(close, volatility_length) * 100
-
-// Additional filter calculations
-// Price movement filter
-price_change = math.abs(close - close[price_period]) / close[price_period] * 100
-
-// ATR growth filter
-atr_current = ta.atr(14)
-atr_avg = ta.sma(atr_current, atr_growth_length)
-atr_growth = atr_current / atr_avg
-
-// Block if worse than filter
-price_move_current_bar = math.abs(close - close[1]) / close[1] * 100
-
-// SuperTrend trend filter
-var float st_trend_line = na
-var int st_trend_direction = 1
-[st_trend_new_line, st_trend_new_dir] = calculate_supertrend(high, low, close, st_trend_factor, st_trend_period, st_trend_direction, st_trend_line)
-st_trend_line := st_trend_new_line
-st_trend_direction := st_trend_new_dir
-
-// Pin Bar detection
-pin_bar_detection() =>
-    body = math.abs(close - open)
-    upper_shadow = high - math.max(open, close)
-    lower_shadow = math.min(open, close) - low
-    total_range = high - low
-    
-    // Long pin bar (hammer)
-    long_pin = lower_shadow > body * 2 and upper_shadow < body * 0.5 and total_range > atr_14 * 0.5
-    // Short pin bar (shooting star)
-    short_pin = upper_shadow > body * 2 and lower_shadow < body * 0.5 and total_range > atr_14 * 0.5
-    
-    [long_pin, short_pin]
-
-[pin_long, pin_short] = pin_bar_detection()
-
-// RSI crossovers for different conditions
-rsi_cross_up_oversold = ta.crossover(rsi_calc, rsi_oversold)
-rsi_cross_down_overbought = ta.crossunder(rsi_calc, rsi_overbought)
-rsi_cross_down_overbought_2 = ta.crossunder(rsi_calc, rsi_overbought)
-rsi_cross_up_oversold_2 = ta.crossover(rsi_calc, rsi_oversold)
-
-// MACD crossovers
-macd_cross_signal_up = ta.crossover(macd_line, macd_signal)
-macd_cross_signal_down = ta.crossunder(macd_line, macd_signal)
-macd_cross_zero_up = ta.crossover(macd_line, 0)
-macd_cross_zero_down = ta.crossunder(macd_line, 0)
-
-// Stochastic crossovers
-stoch_cross_oversold_up = ta.crossover(stoch_k_calc, stoch_oversold)
-stoch_cross_overbought_down = ta.crossunder(stoch_k_calc, stoch_overbought)
-stoch_cross_overbought_down_2 = ta.crossunder(stoch_k_calc, stoch_overbought)
-stoch_cross_oversold_up_2 = ta.crossover(stoch_k_calc, stoch_oversold)
-stoch_k_cross_d_up = ta.crossover(stoch_k_calc, stoch_d_calc)
-stoch_k_cross_d_down = ta.crossunder(stoch_k_calc, stoch_d_calc)
-
-// Moving Average crossovers
-ma_fast_cross_slow_up = ta.crossover(ma_fast_calc, ma_slow_calc)
-ma_fast_cross_slow_down = ta.crossunder(ma_fast_calc, ma_slow_calc)
-
-// CMF and BOP crossovers
-cmf_cross_zero_up = ta.crossover(cmf_value, 0)
-cmf_cross_zero_down = ta.crossunder(cmf_value, 0)
-bop_cross_zero_up = ta.crossover(bop_value, 0)
-bop_cross_zero_down = ta.crossunder(bop_value, 0)
-
-// External indicators crossovers
-external1_cross_zero_up = ta.crossover(external1_source, 0)
-external1_cross_zero_down = ta.crossunder(external1_source, 0)
-external2_cross_zero_up = ta.crossover(external2_source, 0)
-external2_cross_zero_down = ta.crossunder(external2_source, 0)
+// RSI with MTF
+rsi_calc = rsi_tf == "" ? ta.rsi(close, rsi_length) : request.security(syminfo.tickerid, rsi_tf, ta.rsi(close, rsi_length), lookahead=barmerge.lookahead_off)
 
 // Moving Averages
-ma_fast_calc = ma_function(close, ma_fast_length, ma_fast_type)
-ma_slow_calc = ma_function(close, ma_slow_length, ma_slow_type)
+ma_fast_calc = ma_function(ma_fast_source, ma_fast_length, ma_fast_type)
+ma_slow_calc = ma_function(ma_slow_source, ma_slow_length, ma_slow_type)
 
 // Bollinger Bands / Keltner Channel
 channel_basis = channel_type == "Bollinger Bands" ? ta.sma(close, channel_length) : ta.ema(close, channel_length)
@@ -660,14 +610,12 @@ channel_dev = channel_type == "Bollinger Bands" ? channel_multiplier * ta.stdev(
 channel_upper = channel_basis + channel_dev
 channel_lower = channel_basis - channel_dev
 
-// RSI with MTF
-rsi_calc = rsi_tf == "" ? ta.rsi(close, rsi_length) : request.security(syminfo.tickerid, rsi_tf, ta.rsi(close, rsi_length), lookahead=barmerge.lookahead_off)
-
-// Other indicators
+// Stochastic
 stoch_k_raw = ta.stoch(close, high, low, stoch_k_length)
 stoch_k_calc = ta.sma(stoch_k_raw, stoch_k_smooth)
 stoch_d_calc = ta.sma(stoch_k_calc, stoch_d_smooth)
 
+// Other indicators
 mfi_calc = ta.mfi(hlc3, mfi_length)
 cci_calc = ta.cci(hlc3, cci_length)
 [macd_line, macd_signal, macd_hist] = ta.macd(close, macd_fast_length, macd_slow_length, macd_signal_length)
@@ -813,6 +761,19 @@ candle_patterns() =>
 
 [candle_bull, candle_bear] = candle_patterns()
 
+// SuperTrend calculations
+var float st_line = na
+var int st_direction = 1
+[st_new_line, st_new_dir] = calculate_supertrend(high, low, close, st_factor, st_period, st_direction, st_line)
+st_line := st_new_line
+st_direction := st_new_dir
+
+var float st2_line = na
+var int st2_direction = 1
+[st2_new_line, st2_new_dir] = calculate_supertrend(high, low, close, st2_factor, st2_period, st2_direction, st2_line)
+st2_line := st2_new_line
+st2_direction := st2_new_dir
+
 // Volume and Volatility
 volume_avg = ta.sma(volume, volume_length)
 volatility_calc = ta.stdev(close, volatility_length) / ta.sma(close, volatility_length) * 100
@@ -836,7 +797,57 @@ var int st_trend_direction = 1
 st_trend_line := st_trend_new_line
 st_trend_direction := st_trend_new_dir
 
+// Pin Bar detection
+pin_bar_detection() =>
+    body = math.abs(close - open)
+    upper_shadow = high - math.max(open, close)
+    lower_shadow = math.min(open, close) - low
+    total_range = high - low
+    
+    // Long pin bar (hammer)
+    long_pin = lower_shadow > body * 2 and upper_shadow < body * 0.5 and total_range > atr_14 * 0.5
+    // Short pin bar (shooting star)
+    short_pin = upper_shadow > body * 2 and lower_shadow < body * 0.5 and total_range > atr_14 * 0.5
+    
+    [long_pin, short_pin]
 
+[pin_long, pin_short] = pin_bar_detection()
+
+// RSI crossovers for different conditions
+rsi_cross_up_oversold = ta.crossover(rsi_calc, rsi_oversold)
+rsi_cross_down_overbought = ta.crossunder(rsi_calc, rsi_overbought)
+rsi_cross_down_overbought_2 = ta.crossunder(rsi_calc, rsi_overbought)
+rsi_cross_up_oversold_2 = ta.crossover(rsi_calc, rsi_oversold)
+
+// MACD crossovers
+macd_cross_signal_up = ta.crossover(macd_line, macd_signal)
+macd_cross_signal_down = ta.crossunder(macd_line, macd_signal)
+macd_cross_zero_up = ta.crossover(macd_line, 0)
+macd_cross_zero_down = ta.crossunder(macd_line, 0)
+
+// Stochastic crossovers
+stoch_cross_oversold_up = ta.crossover(stoch_k_calc, stoch_oversold)
+stoch_cross_overbought_down = ta.crossunder(stoch_k_calc, stoch_overbought)
+stoch_cross_overbought_down_2 = ta.crossunder(stoch_k_calc, stoch_overbought)
+stoch_cross_oversold_up_2 = ta.crossover(stoch_k_calc, stoch_oversold)
+stoch_k_cross_d_up = ta.crossover(stoch_k_calc, stoch_d_calc)
+stoch_k_cross_d_down = ta.crossunder(stoch_k_calc, stoch_d_calc)
+
+// Moving Average crossovers
+ma_fast_cross_slow_up = ta.crossover(ma_fast_calc, ma_slow_calc)
+ma_fast_cross_slow_down = ta.crossunder(ma_fast_calc, ma_slow_calc)
+
+// CMF and BOP crossovers
+cmf_cross_zero_up = ta.crossover(cmf_value, 0)
+cmf_cross_zero_down = ta.crossunder(cmf_value, 0)
+bop_cross_zero_up = ta.crossover(bop_value, 0)
+bop_cross_zero_down = ta.crossunder(bop_value, 0)
+
+// External indicators crossovers
+external1_cross_zero_up = ta.crossover(external1_source, 0)
+external1_cross_zero_down = ta.crossunder(external1_source, 0)
+external2_cross_zero_up = ta.crossover(external2_source, 0)
+external2_cross_zero_down = ta.crossunder(external2_source, 0)
 
 // ===============================
 // SIGNAL ARCHITECTURE WITH MEMORY
@@ -1594,13 +1605,45 @@ if use_external2
         met_conditions_short += 1
 
 // ===============================
-// FILTERS
+// FILTER CALCULATIONS
 // ===============================
 
 // Volume Filter
 volume_filter_passed = true
 if use_volume_filter
     volume_filter_passed := volume > volume_avg * volume_multiplier
+
+// VOL1 vs VOL2 Filter
+vol1_vol2_filter_passed = true
+if use_vol1_vol2
+    // VOL1 vs VOL2 calculations
+    vol1_smoothed = smoothing_function(volume, vol1_length, vol_smoothing_method)
+    vol2_smoothed = smoothing_function(volume, vol2_length, vol_smoothing_method)
+    
+    vol_diff_percent = math.abs(vol1_smoothed - vol2_smoothed) / vol2_smoothed * 100
+    if vol1_to_vol2 == "VOL1 < VOL2"
+        vol1_vol2_filter_passed := vol1_smoothed < vol2_smoothed and vol_diff_percent >= vol1_vol2_threshold
+    else
+        vol1_vol2_filter_passed := vol1_smoothed > vol2_smoothed and vol_diff_percent >= vol1_vol2_threshold
+
+// Highest/Lowest Bar Filter
+highlow_filter_passed = true
+if use_highlow_signal
+    // Highest/Lowest Bar calculations
+    is_highest_bar = high == ta.highest(high, highlow_signal_period)
+    is_lowest_bar = low == ta.lowest(low, highlow_signal_period)
+    highlow_atr = ta.atr(highlow_atr_length)
+    
+    price_condition = true
+    atr_condition = true
+    
+    if highlow_price_percent > 0
+        price_condition := math.abs(close - close[1]) / close[1] * 100 >= highlow_price_percent
+    
+    if highlow_atr_percent > 0
+        atr_condition := highlow_atr >= ta.atr(14) * (1 + highlow_atr_percent / 100)
+    
+    highlow_filter_passed := (is_highest_bar or is_lowest_bar) and price_condition and atr_condition
 
 // Volatility Filter
 volatility_filter_passed = true
@@ -1628,7 +1671,7 @@ if use_st_trend_filter
     st_trend_filter_passed := st_trend_direction == 1 // Allow both directions, modify as needed
 
 // Combine all filters
-all_filters_passed = volume_filter_passed and volatility_filter_passed and price_filter_passed and atr_growth_filter_passed and block_worse_filter_passed and st_trend_filter_passed
+all_filters_passed = volume_filter_passed and volatility_filter_passed and price_filter_passed and atr_growth_filter_passed and block_worse_filter_passed and st_trend_filter_passed and vol1_vol2_filter_passed and highlow_filter_passed
 
 // ===============================
 // ENTRY CONDITIONS
@@ -1648,7 +1691,7 @@ final_short_signal = use_short_trades and time_trade_allowed and entry_condition
 // STRATEGY EXECUTION
 // ===============================
 
-// Order Indent Logic - ИСПРАВЛЕННАЯ ВЕРСИЯ
+// Order Indent Logic
 if use_order_indent and (final_long_signal or final_short_signal) and strategy.position_size == 0
     if final_long_signal
         indent_target_price := close * (1 - indent_percent / 100)
@@ -1669,7 +1712,7 @@ if not na(indent_target_price)
         waiting_for_long_indent := false
         waiting_for_short_indent := false
 
-// Execute Orders - ИСПРАВЛЕННАЯ ВЕРСИЯ
+// Execute Orders
 if final_long_signal and strategy.position_size == 0 and not use_order_indent
     strategy.entry("Long", strategy.long)
     last_entry_bar_index := bar_index
@@ -1678,7 +1721,7 @@ if final_short_signal and strategy.position_size == 0 and not use_order_indent
     strategy.entry("Short", strategy.short)
     last_entry_bar_index := bar_index
 
-// Execute indent orders - ИСПРАВЛЕННАЯ ВЕРСИЯ
+// Execute indent orders
 if not na(indent_target_price) and strategy.position_size == 0
     if waiting_for_long_indent and close <= indent_target_price
         strategy.entry("Long", strategy.long)
@@ -1702,7 +1745,7 @@ if not na(indent_target_price) and strategy.position_size == 0
 sl_percent_final = sl_equals_tp ? take_profit_percent : stop_loss_percent
 avg_price = strategy.position_avg_price
 
-// Breakeven Logic - ИСПРАВЛЕННАЯ ВЕРСИЯ
+// Breakeven Logic
 if use_breakeven and strategy.position_size != 0 and not breakeven_activated
     profit_percent = 0.0
     if strategy.position_size > 0
@@ -1713,7 +1756,7 @@ if use_breakeven and strategy.position_size != 0 and not breakeven_activated
     if profit_percent >= breakeven_activation
         breakeven_activated := true
 
-// Trailing Stop Logic - ИСПРАВЛЕННАЯ ВЕРСИЯ
+// Trailing Stop Logic
 if use_trailing_stop and strategy.position_size != 0
     profit_percent = 0.0
     if strategy.position_size > 0
@@ -1729,7 +1772,7 @@ if use_trailing_stop and strategy.position_size != 0
             new_trailing_level = close * (1 + trailing_distance / 100)
             trailing_stop_level := na(trailing_stop_level) ? new_trailing_level : math.min(trailing_stop_level, new_trailing_level)
 
-// TP/SL Execution - ИСПРАВЛЕННАЯ ВЕРСИЯ
+// TP/SL Execution
 if strategy.position_size != 0
     tp_level = 0.0
     sl_level = 0.0
@@ -1749,17 +1792,19 @@ if strategy.position_size != 0
             sl_level := math.max(sl_level, trailing_stop_level)
         
         // Multi TP or regular exit
-        if use_multi_tp and not tp1_executed and not tp2_executed and not tp3_executed
+        if use_multi_tp and not tp1_executed and not tp2_executed and not tp3_executed and not tp4_executed
             // Reset Multi TP flags when new position opens
             if strategy.position_size != strategy.position_size[1]
                 tp1_executed := false
                 tp2_executed := false
                 tp3_executed := false
+                tp4_executed := false
             
             total_qty = math.abs(strategy.position_size)
             tp1_price = avg_price * (1 + tp1_percent / 100)
             tp2_price = avg_price * (1 + tp2_percent / 100)
             tp3_price = avg_price * (1 + tp3_percent / 100)
+            tp4_price = avg_price * (1 + tp4_percent / 100)
             
             tp1_qty_calc = total_qty * tp1_qty / 100
             tp2_qty_calc = total_qty * tp2_qty / 100
@@ -1775,8 +1820,9 @@ if strategy.position_size != 0
             if not tp3_executed and close >= tp3_price
                 strategy.close("Long", qty=tp3_qty_calc, comment="TP3")
                 tp3_executed := true
-            if close >= tp_level
+            if not tp4_executed and close >= tp4_price
                 strategy.close("Long", qty=remaining_qty, comment="TP4")
+                tp4_executed := true
             if close <= sl_level
                 strategy.close_all(comment="SL")
         else
@@ -1797,17 +1843,19 @@ if strategy.position_size != 0
             sl_level := math.min(sl_level, trailing_stop_level)
         
         // Multi TP or regular exit
-        if use_multi_tp and not tp1_executed and not tp2_executed and not tp3_executed
+        if use_multi_tp and not tp1_executed and not tp2_executed and not tp3_executed and not tp4_executed
             // Reset Multi TP flags when new position opens
             if strategy.position_size != strategy.position_size[1]
                 tp1_executed := false
                 tp2_executed := false
                 tp3_executed := false
+                tp4_executed := false
             
             total_qty = math.abs(strategy.position_size)
             tp1_price = avg_price * (1 - tp1_percent / 100)
             tp2_price = avg_price * (1 - tp2_percent / 100)
             tp3_price = avg_price * (1 - tp3_percent / 100)
+            tp4_price = avg_price * (1 - tp4_percent / 100)
             
             tp1_qty_calc = total_qty * tp1_qty / 100
             tp2_qty_calc = total_qty * tp2_qty / 100
@@ -1823,8 +1871,9 @@ if strategy.position_size != 0
             if not tp3_executed and close <= tp3_price
                 strategy.close("Short", qty=tp3_qty_calc, comment="TP3")
                 tp3_executed := true
-            if close <= tp_level
+            if not tp4_executed and close <= tp4_price
                 strategy.close("Short", qty=remaining_qty, comment="TP4")
+                tp4_executed := true
             if close >= sl_level
                 strategy.close_all(comment="SL")
         else
@@ -1876,7 +1925,7 @@ if close_by_levels and strategy.position_size != 0 and use_levels and profit_che
     if levels_close_condition
         strategy.close_all(comment="Levels Close")
 
-// Pyramiding Logic - ИСПРАВЛЕННАЯ ВЕРСИЯ
+// Pyramiding Logic
 if use_pyramiding and strategy.position_size != 0
     price_move = 0.0
     if strategy.position_size > 0
@@ -1890,7 +1939,7 @@ if use_pyramiding and strategy.position_size != 0
         if strategy.position_size < 0 and final_short_signal
             strategy.entry("Pyramid S", strategy.short)
 
-// Reverse Orders Logic - ИСПРАВЛЕННАЯ ВЕРСИЯ
+// Reverse Orders Logic
 if use_reverse_order_on_sl and strategy.closedtrades > 0
     last_trade = strategy.closedtrades - 1
     last_profit = strategy.closedtrades.profit(last_trade)
@@ -1924,6 +1973,7 @@ if strategy.position_size == 0 and strategy.position_size[1] != 0
     tp1_executed := false
     tp2_executed := false
     tp3_executed := false
+    tp4_executed := false
     waiting_for_long_indent := false
     waiting_for_short_indent := false
 
@@ -2008,7 +2058,7 @@ if barstate.islast
     
     table.cell(info_table, 0, 6, "Breakeven:", text_color=color.white)
     table.cell(info_table, 1, 6, breakeven_activated ? "Active" : "Inactive", text_color=breakeven_activated ? color.green : color.gray)
-    table.cell(info_table, 2, 6, use_multi_tp ? (str.tostring(tp1_executed) + "/" + str.tostring(tp2_executed) + "/" + str.tostring(tp3_executed)) : "", text_color=color.white)
+    table.cell(info_table, 2, 6, use_multi_tp ? (str.tostring(tp1_executed) + "/" + str.tostring(tp2_executed) + "/" + str.tostring(tp3_executed) + "/" + str.tostring(tp4_executed)) : "", text_color=color.white)
 
     table.cell(info_table, 0, 7, "Indent:", text_color=color.white)
     table.cell(info_table, 1, 7, waiting_for_long_indent ? "Wait Long" : "-", text_color=waiting_for_long_indent ? color.yellow : color.gray)
