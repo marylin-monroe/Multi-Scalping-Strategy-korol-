@@ -97,7 +97,7 @@ breakeven_level = input.float(0.1, "New Breakeven SL (%)", minval=0.0, maxval=5.
 // Multiple Take Profits
 // ===============================
 mtp_group = "====== Use Multiple Take Profits ? ======"
-use_multi_tp = input.bool(false, "====== Use Multiple Take Profits ? ======", group=mtp_group)
+use_multiple_tp = input.bool(false, "====== Use Multiple Take Profits ? ======", group=mtp_group)
 tp1_percent = input.float(0.2, "Profit Percent for 1 TP (%)", minval=0.1, maxval=10.0, step=0.1, group=mtp_group)
 tp1_qty = input.int(10, "Value of 1 TP (%)", minval=10, maxval=90, group=mtp_group)
 tp2_percent = input.float(0.5, "Profit Percent for 2 TP (%)", minval=0.1, maxval=15.0, step=0.1, group=mtp_group)
@@ -768,17 +768,25 @@ if use_block_worse and strategy.closedtrades > 0
 st_long_signal = false
 st_short_signal = false
 st2_long_signal = false
-st2_short_signal = false
+st2_short_signal = false // Объявлена как bool
 
-supertrend_filter_passed = true
+supertrend_filter_passed = true // Должна быть true по умолчанию, если фильтр не используется или пройден
 if use_supertrend
-    st_long_signal := not opposite_st_signal ? st_trend1 == 1 : st_trend1 == -1
-    st_short_signal := not opposite_st_signal ? st_trend1 == -1 : st_trend1 == 1
+    // Убедимся, что st_trend1 это 1 или -1. Если na, сигнал будет false.
+    is_st_trend1_up = nz(st_trend1) == 1
+    is_st_trend1_down = nz(st_trend1) == -1
 
-supertrend2_filter_passed = true
+    st_long_signal := not opposite_st_signal ? is_st_trend1_up : is_st_trend1_down
+    st_short_signal := not opposite_st_signal ? is_st_trend1_down : is_st_trend1_up
+
+supertrend2_filter_passed = true // Должна быть true по умолчанию
 if use_supertrend2
-    st2_long_signal := not opposite_st2_signal ? st_trend2 == 1 : st_trend2 == -1
-    st2_short_signal := not opposite_st2_signal ? st_trend2 == -1 : st_trend2 == 1
+    // Убедимся, что st_trend2 это 1 или -1. Если na, сигнал будет false.
+    is_st_trend2_up = nz(st_trend2) == 1 
+    is_st_trend2_down = nz(st_trend2) == -1
+
+    st2_long_signal := not opposite_st2_signal ? is_st_trend2_up : is_st_trend2_down
+    st2_short_signal := not opposite_st2_signal ? is_st_trend2_down : is_st_trend2_up 
 
 // Moving Averages
 ma1_calc = ma_timeframe == "" or ma_timeframe == "Not Active" or ma_timeframe == "Chart" ? 
@@ -1183,7 +1191,7 @@ if use_candlestick_patterns
     if shooting_star_short
         candle_pattern_short := upper_shadow > 2 * body and lower_shadow < body and close < open and body > avg_body * 0.3
         
-    // Engulfing patterns
+// Engulfing patterns
     if engulfing_both
         bullish_engulfing = close > open and close[1] < open[1] and close > open[1] and open < close[1]
         bearish_engulfing = close < open and close[1] > open[1] and close < open[1] and open > close[1]
@@ -1192,7 +1200,9 @@ if use_candlestick_patterns
         
     // Doji patterns
     if doji_both
-        is_doji = body <= (high - low) * 0.1
+        body_size = math.abs(close - open)
+        total_range = high - low
+        is_doji = total_range > 0 and body_size <= total_range * 0.1
         candle_pattern_long := candle_pattern_long or is_doji
         candle_pattern_short := candle_pattern_short or is_doji
         
@@ -1263,7 +1273,7 @@ pivot_lows_final = pivot_timeframe == "" or pivot_timeframe == "Chart" ?
 if not na(pivot_highs_final) and array.size(resistance_levels) < pivot_limit
     array.push(resistance_levels, pivot_highs_final)
 if not na(pivot_lows_final) and array.size(support_levels) < pivot_limit
-    array.push(support_levels, pivot_lows_final))
+    array.push(support_levels, pivot_lows_final)
 
 // Check proximity to levels
 near_resistance = false
@@ -1320,39 +1330,23 @@ if use_accumulation
             acc_signal_long := true
 
 // All filters combined
-base_filters_passed = time_trade_allowed and 
-                      vol_filter_passed and 
-                      highlow_filter_passed and 
-                      block_worse_filter_passed and 
-                      atr_filter_passed and 
-                      pivot_filter_passed and 
-                      acc_filter_passed
+base_filters_passed = time_trade_allowed and vol_filter_passed and highlow_filter_passed and block_worse_filter_passed and atr_filter_passed and pivot_filter_passed and acc_filter_passed
 
 // Range filters for long
-long_range_filters_passed = rsi_long_range_passed and 
-                           stoch_long_range_passed and
-                           rvi_long_range_passed and 
-                           mfi_long_range_passed and
-                           cci_long_range_passed and 
-                           dmi_long_range_passed and
-                           cmf_long_range_passed and 
-                           bop_long_range_passed and
-                           smio_long_range_passed and 
-                           momentum_long_range_passed and
-                           external_long_passed
+rsi_stoch_long = rsi_long_range_passed and stoch_long_range_passed
+rvi_mfi_long = rvi_long_range_passed and mfi_long_range_passed
+cci_dmi_long = cci_long_range_passed and dmi_long_range_passed
+cmf_bop_long = cmf_long_range_passed and bop_long_range_passed
+smio_momentum_long = smio_long_range_passed and momentum_long_range_passed
+long_range_filters_passed = rsi_stoch_long and rvi_mfi_long and cci_dmi_long and cmf_bop_long and smio_momentum_long and external_long_passed
 
-// Range filters for short  
-short_range_filters_passed = rsi_short_range_passed and 
-                            stoch_short_range_passed and
-                            rvi_short_range_passed and 
-                            mfi_short_range_passed and
-                            cci_short_range_passed and 
-                            dmi_short_range_passed and
-                            cmf_short_range_passed and 
-                            bop_short_range_passed and
-                            smio_short_range_passed and 
-                            momentum_short_range_passed and
-                            external_short_passed
+// Range filters for short
+rsi_stoch_short = rsi_short_range_passed and stoch_short_range_passed
+rvi_mfi_short = rvi_short_range_passed and mfi_short_range_passed
+cci_dmi_short = cci_short_range_passed and dmi_short_range_passed
+cmf_bop_short = cmf_short_range_passed and bop_short_range_passed
+smio_momentum_short = smio_short_range_passed and momentum_short_range_passed
+short_range_filters_passed = rsi_stoch_short and rvi_mfi_short and cci_dmi_short and cmf_bop_short and smio_momentum_short and external_short_passed
 
 // Final filter combination
 all_filters_passed_long = base_filters_passed and long_range_filters_passed
@@ -1380,10 +1374,20 @@ if use_rsi_cross
     active_conditions_short += 1
     
     memory_bars = activate_rsi_memory ? rsi_memory_bars : 0
-    rsi_long_active = activate_rsi_memory ? bar_index - rsi_long_signal_bar <= memory_bars : 
-                      (rsi_cross_up and not opposite_rsi_cross) or (rsi_cross_down and opposite_rsi_cross)
-    rsi_short_active = activate_rsi_memory ? bar_index - rsi_short_signal_bar <= memory_bars : 
-                       (rsi_cross_down and not opposite_rsi_cross) or (rsi_cross_up and opposite_rsi_cross)
+    
+    // Calculate RSI conditions separately
+    rsi_long_condition_normal = rsi_cross_up and not opposite_rsi_cross
+    rsi_long_condition_opposite = rsi_cross_down and opposite_rsi_cross
+    rsi_long_condition_immediate = rsi_long_condition_normal or rsi_long_condition_opposite
+    rsi_long_condition_memory = bar_index - rsi_long_signal_bar <= memory_bars
+    
+    rsi_short_condition_normal = rsi_cross_down and not opposite_rsi_cross
+    rsi_short_condition_opposite = rsi_cross_up and opposite_rsi_cross
+    rsi_short_condition_immediate = rsi_short_condition_normal or rsi_short_condition_opposite
+    rsi_short_condition_memory = bar_index - rsi_short_signal_bar <= memory_bars
+    
+    rsi_long_active = activate_rsi_memory ? rsi_long_condition_memory : rsi_long_condition_immediate
+    rsi_short_active = activate_rsi_memory ? rsi_short_condition_memory : rsi_short_condition_immediate
     
     if rsi_long_active
         met_conditions_long += 1
@@ -1442,10 +1446,20 @@ if use_ma_cross
     active_conditions_short += 1
     
     memory_bars = activate_ma_memory ? ma_memory_bars : 0
-    ma_long_active = activate_ma_memory ? bar_index - ma_long_signal_bar <= memory_bars : 
-                     (ma_cross_up and not opposite_ma_cross) or (ma_cross_down and opposite_ma_cross)
-    ma_short_active = activate_ma_memory ? bar_index - ma_short_signal_bar <= memory_bars : 
-                      (ma_cross_down and not opposite_ma_cross) or (ma_cross_up and opposite_ma_cross)
+    
+    // Calculate MA conditions separately
+    ma_long_condition_normal = ma_cross_up and not opposite_ma_cross
+    ma_long_condition_opposite = ma_cross_down and opposite_ma_cross
+    ma_long_condition_immediate = ma_long_condition_normal or ma_long_condition_opposite
+    ma_long_condition_memory = bar_index - ma_long_signal_bar <= memory_bars
+    
+    ma_short_condition_normal = ma_cross_down and not opposite_ma_cross
+    ma_short_condition_opposite = ma_cross_up and opposite_ma_cross
+    ma_short_condition_immediate = ma_short_condition_normal or ma_short_condition_opposite
+    ma_short_condition_memory = bar_index - ma_short_signal_bar <= memory_bars
+    
+    ma_long_active = activate_ma_memory ? ma_long_condition_memory : ma_long_condition_immediate
+    ma_short_active = activate_ma_memory ? ma_short_condition_memory : ma_short_condition_immediate
     
     if ma_long_active
         met_conditions_long += 1
@@ -1458,8 +1472,11 @@ if use_stoch_cross_level
     active_conditions_short += 1
     
     memory_bars = activate_stoch_cross_memory ? stoch_cross_memory_bars : 0
-    stoch_long_active = activate_stoch_cross_memory ? bar_index - stoch_long_signal_bar <= memory_bars : stoch_cross_up
-    stoch_short_active = activate_stoch_cross_memory ? bar_index - stoch_short_signal_bar <= memory_bars : stoch_cross_down
+    stoch_long_condition_memory = bar_index - stoch_long_signal_bar <= memory_bars
+    stoch_short_condition_memory = bar_index - stoch_short_signal_bar <= memory_bars
+    
+    stoch_long_active = activate_stoch_cross_memory ? stoch_long_condition_memory : stoch_cross_up
+    stoch_short_active = activate_stoch_cross_memory ? stoch_short_condition_memory : stoch_cross_down
     
     if stoch_long_active
         met_conditions_long += 1
@@ -1472,10 +1489,20 @@ if use_stoch_kd_cross
     active_conditions_short += 1
     
     memory_bars = activate_stoch_kd_memory ? stoch_kd_memory_bars : 0
-    stoch_kd_long_active = activate_stoch_kd_memory ? bar_index - stoch_kd_long_signal_bar <= memory_bars : 
-                           (stoch_kd_cross_up and not opposite_stoch_kd) or (stoch_kd_cross_down and opposite_stoch_kd)
-    stoch_kd_short_active = activate_stoch_kd_memory ? bar_index - stoch_kd_short_signal_bar <= memory_bars : 
-                            (stoch_kd_cross_down and not opposite_stoch_kd) or (stoch_kd_cross_up and opposite_stoch_kd)
+    
+    // Calculate conditions separately for clarity
+    stoch_kd_long_condition_normal = stoch_kd_cross_up and not opposite_stoch_kd
+    stoch_kd_long_condition_opposite = stoch_kd_cross_down and opposite_stoch_kd
+    stoch_kd_long_condition_immediate = stoch_kd_long_condition_normal or stoch_kd_long_condition_opposite
+    stoch_kd_long_condition_memory = bar_index - stoch_kd_long_signal_bar <= memory_bars
+    
+    stoch_kd_short_condition_normal = stoch_kd_cross_down and not opposite_stoch_kd
+    stoch_kd_short_condition_opposite = stoch_kd_cross_up and opposite_stoch_kd
+    stoch_kd_short_condition_immediate = stoch_kd_short_condition_normal or stoch_kd_short_condition_opposite
+    stoch_kd_short_condition_memory = bar_index - stoch_kd_short_signal_bar <= memory_bars
+    
+    stoch_kd_long_active = activate_stoch_kd_memory ? stoch_kd_long_condition_memory : stoch_kd_long_condition_immediate
+    stoch_kd_short_active = activate_stoch_kd_memory ? stoch_kd_short_condition_memory : stoch_kd_short_condition_immediate
     
     if stoch_kd_long_active
         met_conditions_long += 1
@@ -1488,8 +1515,11 @@ if use_lrc
     active_conditions_short += 1
     
     memory_bars = disable_lrc_memory ? 0 : lrc_memory_bars
-    lrc_long_active = disable_lrc_memory ? lrc_long_signal : bar_index - lrc_long_signal_bar <= memory_bars
-    lrc_short_active = disable_lrc_memory ? lrc_short_signal : bar_index - lrc_short_signal_bar <= memory_bars
+    lrc_long_condition_memory = bar_index - lrc_long_signal_bar <= memory_bars
+    lrc_short_condition_memory = bar_index - lrc_short_signal_bar <= memory_bars
+    
+    lrc_long_active = disable_lrc_memory ? lrc_long_signal : lrc_long_condition_memory
+    lrc_short_active = disable_lrc_memory ? lrc_short_signal : lrc_short_condition_memory
     
     if lrc_long_active
         met_conditions_long += 1
@@ -1502,8 +1532,11 @@ if use_cmf_cross
     active_conditions_short += 1
     
     memory_bars = disable_cmf_memory ? 0 : 5
-    cmf_long_active = disable_cmf_memory ? cmf_cross_up : bar_index - cmf_long_signal_bar <= memory_bars
-    cmf_short_active = disable_cmf_memory ? cmf_cross_down : bar_index - cmf_short_signal_bar <= memory_bars
+    cmf_long_condition_memory = bar_index - cmf_long_signal_bar <= memory_bars
+    cmf_short_condition_memory = bar_index - cmf_short_signal_bar <= memory_bars
+    
+    cmf_long_active = disable_cmf_memory ? cmf_cross_up : cmf_long_condition_memory
+    cmf_short_active = disable_cmf_memory ? cmf_cross_down : cmf_short_condition_memory
     
     if cmf_long_active
         met_conditions_long += 1
@@ -1516,8 +1549,11 @@ if use_bop_cross
     active_conditions_short += 1
     
     memory_bars = disable_bop_memory ? 0 : 5
-    bop_long_active = disable_bop_memory ? bop_cross_up : bar_index - bop_long_signal_bar <= memory_bars
-    bop_short_active = disable_bop_memory ? bop_cross_down : bar_index - bop_short_signal_bar <= memory_bars
+    bop_long_condition_memory = bar_index - bop_long_signal_bar <= memory_bars
+    bop_short_condition_memory = bar_index - bop_short_signal_bar <= memory_bars
+    
+    bop_long_active = disable_bop_memory ? bop_cross_up : bop_long_condition_memory
+    bop_short_active = disable_bop_memory ? bop_cross_down : bop_short_condition_memory
     
     if bop_long_active
         met_conditions_long += 1
@@ -1530,8 +1566,11 @@ if use_divergence
     active_conditions_short += 1
     
     memory_bars = activate_div_memory ? div_memory_bars : 0
-    div_long_active = activate_div_memory ? bar_index - div_long_signal_bar <= memory_bars : div_long_signal
-    div_short_active = activate_div_memory ? bar_index - div_short_signal_bar <= memory_bars : div_short_signal
+    div_long_condition_memory = bar_index - div_long_signal_bar <= memory_bars
+    div_short_condition_memory = bar_index - div_short_signal_bar <= memory_bars
+    
+    div_long_active = activate_div_memory ? div_long_condition_memory : div_long_signal
+    div_short_active = activate_div_memory ? div_short_condition_memory : div_short_signal
     
     if div_long_active
         met_conditions_long += 1
@@ -1544,8 +1583,11 @@ if use_candlestick_patterns
     active_conditions_short += 1
     
     memory_bars = disable_candle_memory ? 0 : 5
-    candle_long_active = disable_candle_memory ? candle_pattern_long : bar_index - candle_long_signal_bar <= memory_bars
-    candle_short_active = disable_candle_memory ? candle_pattern_short : bar_index - candle_short_signal_bar <= memory_bars
+    candle_long_condition_memory = bar_index - candle_long_signal_bar <= memory_bars
+    candle_short_condition_memory = bar_index - candle_short_signal_bar <= memory_bars
+    
+    candle_long_active = disable_candle_memory ? candle_pattern_long : candle_long_condition_memory
+    candle_short_active = disable_candle_memory ? candle_pattern_short : candle_short_condition_memory
     
     if candle_long_active
         met_conditions_long += 1
@@ -1602,13 +1644,21 @@ if use_min_distance and strategy.position_size != 0
     pyramiding_ok := price_distance_percent >= min_distance_pyramiding
 
 // Final entry conditions
-entry_conditions_met_long = (active_conditions_long > 0 and met_conditions_long == active_conditions_long) or 
-                           (active_conditions_long == 0 and allow_entry_without_indicators)
-entry_conditions_met_short = (active_conditions_short > 0 and met_conditions_short == active_conditions_short) or 
-                            (active_conditions_short == 0 and allow_entry_without_indicators)
+long_conditions_check = active_conditions_long > 0 and met_conditions_long == active_conditions_long
+long_no_indicators = active_conditions_long == 0 and allow_entry_without_indicators
+entry_conditions_met_long = long_conditions_check or long_no_indicators
 
-final_long_signal = use_long_trades and all_filters_passed_long and entry_conditions_met_long and can_enter and pyramiding_ok and barstate.isconfirmed
-final_short_signal = use_short_trades and all_filters_passed_short and entry_conditions_met_short and can_enter and pyramiding_ok and barstate.isconfirmed
+short_conditions_check = active_conditions_short > 0 and met_conditions_short == active_conditions_short
+short_no_indicators = active_conditions_short == 0 and allow_entry_without_indicators
+entry_conditions_met_short = short_conditions_check or short_no_indicators
+
+long_all_filters = use_long_trades and all_filters_passed_long and entry_conditions_met_long
+long_final_checks = can_enter and pyramiding_ok and barstate.isconfirmed
+final_long_signal = long_all_filters and long_final_checks
+
+short_all_filters = use_short_trades and all_filters_passed_short and entry_conditions_met_short
+short_final_checks = can_enter and pyramiding_ok and barstate.isconfirmed
+final_short_signal = short_all_filters and short_final_checks
 
 // ===============================
 // ATR CALCULATIONS FOR SL/TP
@@ -1717,44 +1767,42 @@ if strategy.position_size < 0
        should_close_pivot
         strategy.close("Short", comment="Close Condition")
 
-// Standard TP/SL or Multi TP
+        // Multiple TP or Standard TP/SL Logic
 if strategy.position_size != 0
     avg_price = strategy.position_avg_price
     sl_percent_final = sl_equals_tp ? take_profit_percent : stop_loss_percent
     
-    if use_multi_tp
-        // Multiple Take Profits
-        current_profit_percent = math.abs((close - avg_price) / avg_price * 100)
+    if use_multiple_tp
+        // Multiple Take Profits Logic
+        profit_long = (close - avg_price) / avg_price * 100
+        profit_short = (avg_price - close) / avg_price * 100
+        current_profit_percent = strategy.position_size > 0 ? profit_long : profit_short
         
         if not tp1_executed and current_profit_percent >= tp1_percent
-            if strategy.position_size > 0
-                strategy.exit("TP1", from_entry="Long", qty_percent=tp1_qty, limit=avg_price * (1 + tp1_percent / 100))
-            else
-                strategy.exit("TP1", from_entry="Short", qty_percent=tp1_qty, limit=avg_price * (1 - tp1_percent / 100))
+            tp1_price = strategy.position_size > 0 ? avg_price * (1 + tp1_percent / 100) : avg_price * (1 - tp1_percent / 100)
+            entry_name = strategy.position_size > 0 ? "Long" : "Short"
+            strategy.exit("TP1", from_entry=entry_name, qty_percent=tp1_qty, limit=tp1_price)
             tp1_executed := true
             
         if not tp2_executed and current_profit_percent >= tp2_percent
-            if strategy.position_size > 0
-                strategy.exit("TP2", from_entry="Long", qty_percent=tp2_qty, limit=avg_price * (1 + tp2_percent / 100))
-            else
-                strategy.exit("TP2", from_entry="Short", qty_percent=tp2_qty, limit=avg_price * (1 - tp2_percent / 100))
+            tp2_price = strategy.position_size > 0 ? avg_price * (1 + tp2_percent / 100) : avg_price * (1 - tp2_percent / 100)
+            entry_name = strategy.position_size > 0 ? "Long" : "Short"
+            strategy.exit("TP2", from_entry=entry_name, qty_percent=tp2_qty, limit=tp2_price)
             tp2_executed := true
             
         if not tp3_executed and current_profit_percent >= tp3_percent
-            if strategy.position_size > 0
-                strategy.exit("TP3", from_entry="Long", qty_percent=tp3_qty, limit=avg_price * (1 + tp3_percent / 100))
-            else
-                strategy.exit("TP3", from_entry="Short", qty_percent=tp3_qty, limit=avg_price * (1 - tp3_percent / 100))
+            tp3_price = strategy.position_size > 0 ? avg_price * (1 + tp3_percent / 100) : avg_price * (1 - tp3_percent / 100)
+            entry_name = strategy.position_size > 0 ? "Long" : "Short"
+            strategy.exit("TP3", from_entry=entry_name, qty_percent=tp3_qty, limit=tp3_price)
             tp3_executed := true
             
         if not tp4_executed and current_profit_percent >= tp4_percent
-            if strategy.position_size > 0
-                strategy.exit("TP4", from_entry="Long", qty_percent=tp4_qty, limit=avg_price * (1 + tp4_percent / 100))
-            else
-                strategy.exit("TP4", from_entry="Short", qty_percent=tp4_qty, limit=avg_price * (1 - tp4_percent / 100))
+            tp4_price = strategy.position_size > 0 ? avg_price * (1 + tp4_percent / 100) : avg_price * (1 - tp4_percent / 100)
+            entry_name = strategy.position_size > 0 ? "Long" : "Short"
+            strategy.exit("TP4", from_entry=entry_name, qty_percent=tp4_qty, limit=tp4_price)
             tp4_executed := true
     else
-        // Standard TP/SL
+        // Standard TP/SL Logic
         if strategy.position_size > 0
             // Long position
             tp_level = use_atr_tp ? avg_price + atr_tp_calc : avg_price * (1 + take_profit_percent / 100)
@@ -1776,7 +1824,8 @@ if strategy.position_size != 0
                     sl_level := trailing_stop_level
             
             strategy.exit("Exit Long", limit=tp_level, stop=sl_level)
-        else
+        
+        if strategy.position_size < 0
             // Short position
             tp_level = use_atr_tp ? avg_price - atr_tp_calc : avg_price * (1 - take_profit_percent / 100)
             sl_level = use_atr_sl ? avg_price + atr_sl_calc : avg_price * (1 + sl_percent_final / 100)
@@ -1812,27 +1861,30 @@ if strategy.position_size == 0 and strategy.position_size[1] != 0
 // VISUALIZATION
 // ===============================
 
+// Pre-calculate ATR for visualization
+atr_for_viz = ta.atr(14)
+
 // Signal visualization
-if show_entry_signals and (show_all_signals or strategy.position_size == 0)
-    if final_long_signal
-        label.new(bar_index, low - ta.atr(14), "LONG\n" + str.tostring(met_conditions_long) + "/" + str.tostring(active_conditions_long), 
-                  color=color.green, style=label.style_label_up, textcolor=color.white, size=size.normal)
-    
-    if final_short_signal
-        label.new(bar_index, high + ta.atr(14), "SHORT\n" + str.tostring(met_conditions_short) + "/" + str.tostring(active_conditions_short), 
-                  color=color.red, style=label.style_label_down, textcolor=color.white, size=size.normal)
+show_long_label = show_entry_signals and (show_all_signals or strategy.position_size == 0) and final_long_signal
+show_short_label = show_entry_signals and (show_all_signals or strategy.position_size == 0) and final_short_signal
+
+if show_long_label
+    label.new(bar_index, low - atr_for_viz, "LONG\n" + str.tostring(met_conditions_long) + "/" + str.tostring(active_conditions_long), 
+              color=color.green, style=label.style_label_up, textcolor=color.white, size=size.normal)
+
+if show_short_label
+    label.new(bar_index, high + atr_for_viz, "SHORT\n" + str.tostring(met_conditions_short) + "/" + str.tostring(active_conditions_short), 
+              color=color.red, style=label.style_label_down, textcolor=color.white, size=size.normal)
 
 // QQE visualization
-if enable_qqe_visual
-    plotshape(qqe_long_signal and not opposite_qqe, title="QQE Long", style=shape.labelup, location=location.belowbar, color=color.green, text="QQE", size=size.tiny)
-    plotshape(qqe_short_signal and not opposite_qqe, title="QQE Short", style=shape.labeldown, location=location.abovebar, color=color.red, text="QQE", size=size.tiny)
+plotshape(enable_qqe_visual and qqe_long_signal and not opposite_qqe, title="QQE Long", style=shape.labelup, location=location.belowbar, color=color.green, text="QQE", size=size.tiny)
+plotshape(enable_qqe_visual and qqe_short_signal and not opposite_qqe, title="QQE Short", style=shape.labeldown, location=location.abovebar, color=color.red, text="QQE", size=size.tiny)
 
 // MACD visualization
-if enable_macd_visual
-    hline(0, "MACD Zero Line", color=color.gray)
-    plot(macd_line, title="MACD Line", color=color.blue)
-    plot(macd_signal_line, title="MACD Signal", color=color.red)
-    plot(macd_hist, title="MACD Histogram", color=color.gray, style=plot.style_histogram)
+hline(enable_macd_visual ? 0 : na, "MACD Zero Line", color=color.gray)
+plot(enable_macd_visual ? macd_line : na, title="MACD Line", color=color.blue)
+plot(enable_macd_visual ? macd_signal_line : na, title="MACD Signal", color=color.red)
+plot(enable_macd_visual ? macd_hist : na, title="MACD Histogram", color=color.gray, style=plot.style_histogram)
 
 // Moving averages
 plot(show_two_mas ? ma1_calc : na, "MA1", color=color.green, linewidth=1)
@@ -1843,58 +1895,59 @@ plot(show_supertrend ? supertrend1 : na, "SuperTrend", color=st_trend1 == 1 ? co
 plot(show_supertrend2 ? supertrend2 : na, "SuperTrend TF2", color=st_trend2 == 1 ? color.blue : color.orange, linewidth=1)
 
 // DMI visualization
-if visualise_dmi
-    plot(di_plus, title="DI+", color=color.green)
-    plot(di_minus, title="DI-", color=color.red)
-    plot(adx, title="ADX", color=color.blue)
+plot(visualise_dmi ? di_plus : na, title="DI+", color=color.green)
+plot(visualise_dmi ? di_minus : na, title="DI-", color=color.red)
+plot(visualise_dmi ? adx : na, title="ADX", color=color.blue)
 
 // Trailing stop visualization
-if visualise_trailing and not na(trailing_stop_level)
-    plot(trailing_stop_level, title="Trailing Stop", color=color.purple, linewidth=2, style=plot.style_circles)
+plot(visualise_trailing ? trailing_stop_level : na, title="Trailing Stop", color=color.purple, linewidth=2, style=plot.style_circles)
 
 // Indent order lines
-if show_last_signal_lines
-    if not na(indent_long_price)
-        line.new(bar_index - 1, indent_long_price, bar_index + cancel_indent_bars, indent_long_price, 
-                 color=color.green, style=line.style_dashed, width=1)
-    if not na(indent_short_price)
-        line.new(bar_index - 1, indent_short_price, bar_index + cancel_indent_bars, indent_short_price, 
-                 color=color.red, style=line.style_dashed, width=1)
+if show_last_signal_lines and not na(indent_long_price)
+    line.new(bar_index - 1, indent_long_price, bar_index + cancel_indent_bars, indent_long_price, 
+             color=color.green, style=line.style_dashed, width=1)
+if show_last_signal_lines and not na(indent_short_price)
+    line.new(bar_index - 1, indent_short_price, bar_index + cancel_indent_bars, indent_short_price, 
+             color=color.red, style=line.style_dashed, width=1)
 
 // Divergence lines
-if show_div_lines and use_divergence
-    if div_long_signal
-        line.new(bar_index - div_pivot_interval, low[div_pivot_interval], bar_index, low, 
-                 color=color.green, style=line.style_solid, width=2)
-    if div_short_signal
-        line.new(bar_index - div_pivot_interval, high[div_pivot_interval], bar_index, high, 
-                 color=color.red, style=line.style_solid, width=2)
+if show_div_lines and use_divergence and div_long_signal
+    line.new(bar_index - div_pivot_interval, low[div_pivot_interval], bar_index, low, 
+             color=color.green, style=line.style_solid, width=2)
+if show_div_lines and use_divergence and div_short_signal
+    line.new(bar_index - div_pivot_interval, high[div_pivot_interval], bar_index, high, 
+             color=color.red, style=line.style_solid, width=2)
 
 // TP/SL visualization
-if show_tp_sl and strategy.position_size != 0
-    avg_price = strategy.position_avg_price
-    sl_percent_final = sl_equals_tp ? take_profit_percent : stop_loss_percent
-    
-    if strategy.position_size > 0
-        tp_level = use_atr_tp ? avg_price + atr_tp_calc : avg_price * (1 + take_profit_percent / 100)
-        sl_level = use_atr_sl ? avg_price - atr_sl_calc : avg_price * (1 - sl_percent_final / 100)
-        plot(tp_level, title="Long TP", color=color.green, linewidth=1, style=plot.style_stepline)
-        plot(sl_level, title="Long SL", color=color.red, linewidth=1, style=plot.style_stepline)
-    else
-        tp_level = use_atr_tp ? avg_price - atr_tp_calc : avg_price * (1 - take_profit_percent / 100)
-        sl_level = use_atr_sl ? avg_price + atr_sl_calc : avg_price * (1 + sl_percent_final / 100)
-        plot(tp_level, title="Short TP", color=color.green, linewidth=1, style=plot.style_stepline)
-        plot(sl_level, title="Short SL", color=color.red, linewidth=1, style=plot.style_stepline)
+tp_sl_avg_price = strategy.position_avg_price
+tp_sl_percent_final = sl_equals_tp ? take_profit_percent : stop_loss_percent
+
+tp_level_long = use_atr_tp ? tp_sl_avg_price + atr_tp_calc : tp_sl_avg_price * (1 + take_profit_percent / 100)
+sl_level_long = use_atr_sl ? tp_sl_avg_price - atr_sl_calc : tp_sl_avg_price * (1 - tp_sl_percent_final / 100)
+tp_level_short = use_atr_tp ? tp_sl_avg_price - atr_tp_calc : tp_sl_avg_price * (1 - take_profit_percent / 100)
+sl_level_short = use_atr_sl ? tp_sl_avg_price + atr_sl_calc : tp_sl_avg_price * (1 + tp_sl_percent_final / 100)
+
+show_long_tp_sl = show_tp_sl and strategy.position_size > 0
+show_short_tp_sl = show_tp_sl and strategy.position_size < 0
+
+plot(show_long_tp_sl ? tp_level_long : na, title="Long TP", color=color.green, linewidth=1, style=plot.style_stepline)
+plot(show_long_tp_sl ? sl_level_long : na, title="Long SL", color=color.red, linewidth=1, style=plot.style_stepline)
+plot(show_short_tp_sl ? tp_level_short : na, title="Short TP", color=color.green, linewidth=1, style=plot.style_stepline)
+plot(show_short_tp_sl ? sl_level_short : na, title="Short SL", color=color.red, linewidth=1, style=plot.style_stepline)
 
 // Status line with inputs (if enabled)
 if inputs_in_status and barstate.islast
+    active_total = active_conditions_long + active_conditions_short
+    met_total = met_conditions_long + met_conditions_short
+    
     status_text = "MSS | " + 
                   "Long:" + str.tostring(use_long_trades) + " " +
                   "Short:" + str.tostring(use_short_trades) + " " +
                   "TP:" + str.tostring(take_profit_percent) + "% " +
                   "SL:" + str.tostring(stop_loss_percent) + "% " +
-                  "Active:" + str.tostring(active_conditions_long + active_conditions_short) + " " +
-                  "Signals:" + str.tostring(met_conditions_long + met_conditions_short)
+                  "Active:" + str.tostring(active_total) + " " +
+                  "Signals:" + str.tostring(met_total)
     
     var table status_table = table.new(position.top_right, 1, 1, bgcolor=color.white, border_width=1)
-    table.cell(status_table, 0, 0, status_text, text_color=color.black, text_size=size.small)
+    if not na(status_table)
+        table.cell(status_table, 0, 0, status_text, text_color=color.black, text_size=size.small)
